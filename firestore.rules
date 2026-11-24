@@ -34,7 +34,8 @@ service cloud.firestore {
           'onsetDaysAgo', 'symptoms', 'dangerSigns', 'householdContact', 'householdDeath',
           'riskLevel', 'rulesRiskLevel', 'riskReasons', 'deidentifiedSummary',
           'recommendedActions', 'inferenceSource', 'latencyMs', 'redactionCount',
-          'createdAt', 'clientCreatedAt', 'isDemo', 'aiEnrichedAt'
+          'createdAt', 'clientCreatedAt', 'isDemo', 'aiEnrichedAt',
+          'suspectedCholera', 'caseDefinition'
         ])
         && d.keys().hasAll([
           'caseId', 'workspaceId', 'agentUid', 'county', 'subCounty', 'ageBand', 'sex',
@@ -46,7 +47,8 @@ service cloud.firestore {
         && isShortString(d.caseId, 16)
         && isShortString(d.county, 64)
         && isShortString(d.subCounty, 64)
-        && d.ageBand in ['0-4', '5-14', '15-49', '50+', 'unknown']
+        // '0-4' is the legacy band, kept so records written by earlier versions stay valid.
+        && d.ageBand in ['0-1', '2-4', '0-4', '5-14', '15-49', '50+', 'unknown']
         && d.sex in ['female', 'male', 'unknown']
         && isStringList(d.symptoms, 16)
         && isStringList(d.dangerSigns, 16)
@@ -60,7 +62,19 @@ service cloud.firestore {
         && d.inferenceSource in ['on_device', 'cloud', 'rules_only']
         && d.redactionCount is int
         && d.clientCreatedAt is int
-        && d.isDemo is bool;
+        && d.isDemo is bool
+        && (!('suspectedCholera' in d) || d.suspectedCholera is bool)
+        && (!('caseDefinition' in d) || d.caseDefinition in ['standard', 'outbreak']);
+    }
+
+    // Outbreak declarations: one document per workspace listing the sub-counties where the county
+    // team has declared an outbreak. It switches field triage to the outbreak case definition.
+    function validDeclaration(d, workspaceId) {
+      return d.keys().hasOnly(['workspaceId', 'subCounties', 'updatedAt', 'updatedBy'])
+        && d.workspaceId == workspaceId
+        && d.updatedBy == request.auth.uid
+        && d.subCounties is list
+        && d.subCounties.size() <= 32;
     }
 
     match /cases/{caseId} {
@@ -82,6 +96,14 @@ service cloud.firestore {
       allow delete: if signedIn()
         && resource.data.workspaceId == request.auth.uid
         && resource.data.isDemo == true;
+    }
+
+    match /declarations/{workspaceId} {
+      allow read: if signedIn() && workspaceId == request.auth.uid;
+      allow create, update: if signedIn()
+        && workspaceId == request.auth.uid
+        && validDeclaration(request.resource.data, workspaceId);
+      allow delete: if false;
     }
 
     match /sitreps/{reportId} {

@@ -67,10 +67,11 @@ Stage Two scores four equally weighted criteria from 1 to 5. Ties break on Techn
 | Name | `InferenceMode` | Why this mode |
 |---|---|---|
 | `rawNoteModel` | `ONLY_ON_DEVICE` | Receives raw text. `ONLY_ON_DEVICE` guarantees the SDK can never fall back to the cloud with identifiable data. |
+| `photoNoteModel` | `ONLY_ON_DEVICE` | Reads a photo of a paper note (JPEG or PNG) with Nano multimodal input. A photo cannot be scrubbed before sending, so it has no cloud path at all. The transcription then follows the raw note path. |
 | `scrubbedNoteModel` | `PREFER_ON_DEVICE` | Receives text already scrubbed by the deterministic redactor. Uses Nano when present, cloud otherwise. This is the hybrid fallback judges expect to see. |
 | `sitrepModel` | `ONLY_IN_CLOUD` | Population-level reasoning over aggregates. Larger cloud model, name from Remote Config. |
 
-All three use structured output: `onDeviceParams.promptOptions.responseConstraint` and `inCloudParams.generationConfig.responseSchema` with `responseMimeType: "application/json"`, sharing one schema from `src/lib/ai/schemas.ts`. Every response is parsed and validated (`zod`); invalid output is a handled error, never a crash.
+All of them use structured output: `onDeviceParams.promptOptions.responseConstraint` and `inCloudParams.generationConfig.responseSchema` with `responseMimeType: "application/json"`, sharing one schema from `src/lib/ai/schemas.ts`. Every response is parsed and validated (`zod`); invalid output is a handled error, never a crash.
 
 The cloud backend is chosen by `NEXT_PUBLIC_AI_BACKEND`: `agent-platform` (Agent Platform Gemini API, formerly Vertex AI, billed to Blaze, used by the hosted demo) or `gemini-developer` (Gemini Developer API, works on Spark). On-device behavior is identical with both.
 
@@ -88,7 +89,7 @@ raw note
      A. Nano available            rawNoteModel(raw)        -> extraction + PII spans -> apply spans
      B. Nano missing, online      privacy gate: show scrubbed text, user confirms -> scrubbedNoteModel(scrubbed)
      C. Nano missing, offline     keyword extraction (extract.ts) now; enqueue AI enrichment of the scrubbed text for later
-  -> evaluateRules(fields)         deterministic risk floor
+  -> evaluateRules(fields, ctx)    deterministic risk floor + GTFCC suspected cholera status (ctx: outbreak declared in the sub-county?)
   -> mergeRisk(rules, ai)          AI may raise risk with a stated reason, never lower it
   -> CaseRecord (de-identified)    written to Firestore without awaiting the server
 ```
@@ -97,15 +98,17 @@ Rules that must never be broken:
 - The raw note is **never** written to Firestore, localStorage, logs, analytics, or any network request. It lives in component state only and is cleared after save.
 - Nothing reaches `scrubbedNoteModel` or `sitrepModel` that has not passed `scrubDeterministic()`.
 - The rules engine output is the floor. A HIGH from rules stays HIGH.
+- Suspected cholera status follows the GTFCC definitions: outside a declared outbreak, age 2+ with AWD and severe dehydration or dying of AWD; in a sub-county with a declared outbreak, any person with or dying of AWD. The declaration changes classification only, never the clinical risk level.
 - Triage submission never awaits a network call.
 
 ### 4.5 Surveillance pipeline (`src/lib/surveillance/`)
 
 1. Query `cases` for the county over the window (Remote Config `cluster_window_days`).
 2. `aggregate.ts`: deterministic counts per sub-county per day, baseline vs. recent window, attack signal.
-3. `detect.ts`: alert status per sub-county from Remote Config thresholds (`NORMAL`, `WATCH`, `CRITICAL`). Pure functions, fully unit tested.
-4. `sitrep.ts`: `sitrepModel` receives **only** the aggregate table and alert statuses. It returns an executive summary, hypotheses to investigate (never asserted transmission chains) and resource recommendations.
-5. The report is saved to `sitreps` with the exact aggregate input used, for auditability.
+3. `detect.ts`: alert status per sub-county from Remote Config thresholds (`NORMAL`, `WATCH`, `CRITICAL`), plus the fixed GTFCC cholera alert (2 or more people aged 2+ with AWD and severe dehydration or death in the same sub-county within the window, at least `WATCH`). Pure functions, fully unit tested.
+4. `epicurve.ts`: cases per day of symptom onset, split into suspected cholera and other cases, optionally filtered to one sub-county. Records without a stored `suspectedCholera` are classified with the standard definition (`isSuspectedCholera` in `aggregate.ts`).
+5. `report.ts` and `tasks.ts`: `sitrepModel` receives **only** the aggregate table and alert statuses. It returns an executive summary, hypotheses to investigate (never asserted transmission chains) and resource recommendations.
+6. The report is saved to `sitreps` with the exact aggregate input used, for auditability.
 
 ### 4.6 Offline and sync
 
@@ -141,7 +144,7 @@ No collection may contain names, phone numbers, exact addresses, free-text raw n
 | `agentUid` | string | Firebase Auth uid |
 | `county` | string | |
 | `subCounty` | string | |
-| `ageBand` | `"0-4" \| "5-14" \| "15-49" \| "50+" \| "unknown"` | Bands only, never exact age |
+| `ageBand` | `"0-1" \| "2-4" \| "5-14" \| "15-49" \| "50+" \| "unknown"` | Bands only, never exact age. Split at 2 years for the GTFCC definition. Legacy `"0-4"` is read as `"unknown"` |
 | `sex` | `"female" \| "male" \| "unknown"` | |
 | `onsetDaysAgo` | number \| null | |
 | `symptoms` | `SymptomCode[]` | Controlled vocabulary in `src/lib/triage/vocabulary.ts` |
@@ -150,6 +153,8 @@ No collection may contain names, phone numbers, exact addresses, free-text raw n
 | `householdDeath` | boolean | |
 | `riskLevel` | `"LOW" \| "MEDIUM" \| "HIGH"` | Final merged level |
 | `rulesRiskLevel` | same | Deterministic floor |
+| `suspectedCholera` | boolean (optional on legacy records) | GTFCC suspected cholera status at triage time |
+| `caseDefinition` | `"standard" \| "outbreak"` (optional on legacy records) | Which GTFCC definition applied, from the outbreak declaration of the sub-county |
 | `riskReasons` | string[] | Human-readable, from rules and AI |
 | `deidentifiedSummary` | string | Max 280 chars, scrubbed |
 | `recommendedActions` | string[] | |
@@ -180,23 +185,36 @@ No collection may contain names, phone numbers, exact addresses, free-text raw n
 | `inferenceSource` | `"cloud"` |
 | `latencyMs` | number |
 
+### `declarations/{workspaceId}`
+
+Sub-counties where the county team has declared an outbreak. Read by field triage (offline too, from the local cache) to select the case definition.
+
+| Field | Type |
+|---|---|
+| `workspaceId` | string (equals the document ID) |
+| `subCounties` | string[] (max 32) |
+| `updatedAt` | timestamp |
+| `updatedBy` | string (uid) |
+
 ---
 
 ## 6. Directory layout
 
 ```
 src/
-  app/                      routes: / (overview), /triage, /cases, /surveillance, /system
+  app/                      routes: / (overview), /triage, /cases, /surveillance, /evidence, /system
   components/               UI components, one per file, PascalCase
   lib/
     firebase/               app.ts (App + App Check), auth.ts, firestore.ts, remote-config.ts
     ai/                     models.ts, schemas.ts, prompts.ts, device.ts (Nano availability), tasks.ts (timed runtime calls)
     cases/                  types.ts (persisted CaseRecord schema, mirrors firestore.rules)
     triage/                 vocabulary.ts, redact.ts, extract.ts, rules.ts, pipeline.ts
-    surveillance/           aggregate.ts, detect.ts, report.ts
+    surveillance/           aggregate.ts, detect.ts, epicurve.ts, report.ts
+    eval/                   dataset.ts (development notes), holdout.ts (never used for tuning), evaluate.ts (scores)
+    egress/                 ledger.ts (in-memory log of every request that carries content off the device)
     offline/                queue.ts (IndexedDB), enrich.ts (replay on reconnect)
-    demo/                   seed.ts (fictional cases), sample-notes.ts
-    hooks.ts, result.ts, ids.ts
+    demo/                   seed.ts (fictional cases), sample-notes.ts, sample-photo.ts
+    hooks.ts, result.ts, ids.ts, photo.ts (downscale and encode a photo on the device)
   *.test.ts                 Vitest specs live next to the module they test
 public/                     icons, manifest.webmanifest
 scripts/                    generate-sw.mjs, sw-template.js

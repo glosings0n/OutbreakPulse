@@ -10,6 +10,7 @@ const NAV = [
   { href: "/triage/", label: "Field report" },
   { href: "/cases/", label: "Cases" },
   { href: "/surveillance/", label: "Surveillance" },
+  { href: "/evidence/", label: "Evidence" },
   { href: "/system/", label: "System" },
 ] as const;
 

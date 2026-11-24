@@ -26,6 +26,9 @@ export interface SubCountyStatus {
   triggers: string[];
 }
 
+/** GTFCC alert threshold, fixed by the guidance rather than tuned in Remote Config. */
+export const CHOLERA_ALERT_MIN_CASES = 2;
+
 export function detectSubCounty(agg: SubCountyAggregate, t: Thresholds): SubCountyStatus {
   const triggers: string[] = [];
   let status: AlertStatus = "NORMAL";
@@ -51,6 +54,12 @@ export function detectSubCounty(agg: SubCountyAggregate, t: Thresholds): SubCoun
       status = "WATCH";
       triggers.push(`${agg.highRiskRecent} high-risk cases in window`);
     }
+  }
+  // GTFCC cholera alert: two or more people aged 2 or older with AWD and severe dehydration,
+  // or dying of AWD, in the same area within the window. It always deserves at least a watch.
+  if (agg.choleraAlertRecent >= CHOLERA_ALERT_MIN_CASES) {
+    if (status === "NORMAL") status = "WATCH";
+    triggers.push(`Cholera alert: ${agg.choleraAlertRecent} cases aged 2 or older with severe dehydration or death`);
   }
 
   return { subCounty: agg.subCounty, status, triggers };

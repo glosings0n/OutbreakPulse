@@ -41,6 +41,21 @@ export const extractionZod = z.object({
 
 export type AiExtraction = z.infer<typeof extractionZod>;
 
+/** Transcription of a photographed paper note. Produced on the device only. */
+export const transcriptionSchema = Schema.object({
+  properties: {
+    transcript: Schema.string({ description: "The handwritten or printed note, word for word" }),
+    legible: Schema.boolean({ description: "False when the photo does not show a readable note" }),
+  },
+});
+
+export const transcriptionZod = z.object({
+  transcript: z.string().catch(""),
+  legible: z.boolean().catch(false),
+});
+
+export type AiTranscription = z.infer<typeof transcriptionZod>;
+
 export const sitrepSchema = Schema.object({
   properties: {
     executiveSummary: Schema.string({ description: "Three to five sentences for the county health management team" }),

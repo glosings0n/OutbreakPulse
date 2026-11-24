@@ -30,8 +30,19 @@ export type DangerSignCode = (typeof DANGER_SIGNS)[number]["code"];
 export const SYMPTOM_CODES = SYMPTOMS.map((s) => s.code) as [SymptomCode, ...SymptomCode[]];
 export const DANGER_SIGN_CODES = DANGER_SIGNS.map((s) => s.code) as [DangerSignCode, ...DangerSignCode[]];
 
-export const AGE_BANDS = ["0-4", "5-14", "15-49", "50+", "unknown"] as const;
+/**
+ * Under-five is split at two years because the GTFCC suspected cholera definition
+ * (outside a declared outbreak) only applies from age 2.
+ */
+export const AGE_BANDS = ["0-1", "2-4", "5-14", "15-49", "50+", "unknown"] as const;
 export type AgeBand = (typeof AGE_BANDS)[number];
+
+/** Band stored by earlier versions. Read as "unknown" because it does not say whether the child is under 2. */
+export const LEGACY_AGE_BANDS = ["0-4"] as const;
+
+export function isUnderFive(band: AgeBand): boolean {
+  return band === "0-1" || band === "2-4";
+}
 
 export const SEXES = ["female", "male", "unknown"] as const;
 export type Sex = (typeof SEXES)[number];
@@ -43,6 +54,19 @@ export const RISK_LABELS: Record<RiskLevel, string> = {
   LOW: "Low risk",
   MEDIUM: "Medium risk",
   HIGH: "High risk",
+};
+
+/**
+ * Which suspected cholera case definition applies (GTFCC):
+ * - standard: no outbreak declared in the area; age 2+ with AWD and severe dehydration, or dying of AWD.
+ * - outbreak: an outbreak has been declared in the area; any person with or dying of AWD.
+ */
+export const CASE_DEFINITIONS = ["standard", "outbreak"] as const;
+export type CaseDefinition = (typeof CASE_DEFINITIONS)[number];
+
+export const CASE_DEFINITION_LABELS: Record<CaseDefinition, string> = {
+  standard: "Standard definition (no outbreak declared)",
+  outbreak: "Outbreak definition (outbreak declared)",
 };
 
 /** Fictional demo geography. */
@@ -60,7 +84,8 @@ export function dangerSignLabel(code: DangerSignCode): string {
 
 export function ageBandFromYears(years: number): AgeBand {
   if (!Number.isFinite(years) || years < 0) return "unknown";
-  if (years < 5) return "0-4";
+  if (years < 2) return "0-1";
+  if (years < 5) return "2-4";
   if (years < 15) return "5-14";
   if (years < 50) return "15-49";
   return "50+";

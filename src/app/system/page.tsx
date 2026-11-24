@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useApp } from "@/components/AppProvider";
-import { DEVICE_LABELS, getDeviceDiagnostics, MIN_CHROME_VERSION, type DeviceDiagnostics } from "@/lib/ai/device";
+import { EgressLedger } from "@/components/EgressLedger";
+import {
+  DEVICE_LABELS,
+  getDeviceDiagnostics,
+  getPhotoAvailability,
+  MIN_CHROME_VERSION,
+  type DeviceAvailability,
+  type DeviceDiagnostics,
+} from "@/lib/ai/device";
 import { AI_BACKEND, AI_BACKEND_LABELS, prepareDeviceModel } from "@/lib/ai/models";
 import { appCheckMode, isFirebaseConfigured } from "@/lib/firebase/app";
 import { firestoreCacheMode } from "@/lib/firebase/firestore";
@@ -26,6 +34,11 @@ export default function SystemPage() {
   const [prepError, setPrepError] = useState<string | null>(null);
   const [swState, setSwState] = useState("Checking...");
   const [diag, setDiag] = useState<DeviceDiagnostics | null>(null);
+  const [photo, setPhoto] = useState<DeviceAvailability | null>(null);
+
+  useEffect(() => {
+    void getPhotoAvailability().then(setPhoto);
+  }, [device]);
 
   useEffect(() => {
     const supported = "serviceWorker" in navigator;
@@ -69,6 +82,8 @@ export default function SystemPage() {
         <p className="mt-1 text-ink-2">Live view of the hybrid stack, for testers and judges.</p>
       </header>
 
+      <EgressLedger />
+
       <section className="card" aria-labelledby="ai-title">
         <h2 id="ai-title" className="section-title">
           Hybrid inference
@@ -80,6 +95,15 @@ export default function SystemPage() {
             hint="Chrome Prompt API, used through Firebase AI Logic. Raw notes are only ever sent to this model."
           />
           <Row label="Raw note model" value={<span className="mono">ONLY_ON_DEVICE</span>} hint="Cannot fall back to the cloud, by design." />
+          <Row
+            label="Paper note photo model"
+            value={
+              <>
+                <span className="mono">ONLY_ON_DEVICE</span>, image input: {photo === null ? "checking..." : DEVICE_LABELS[photo]}
+              </>
+            }
+            hint="A photo cannot be de-identified, so it has no cloud path. Needs chrome://flags/#prompt-api-for-gemini-nano-multimodal-input."
+          />
           <Row label="De-identified note model" value={<span className="mono">PREFER_ON_DEVICE</span>} hint="Gemini Nano when present, cloud fallback otherwise." />
           <Row label="Situation report model" value={<span className="mono">ONLY_IN_CLOUD, {config.sitrepModel}</span>} hint="Receives aggregate counts only." />
           <Row label="Cloud backend" value={AI_BACKEND_LABELS[AI_BACKEND]} hint="Through Firebase AI Logic, protected by App Check." />

@@ -2,7 +2,12 @@
  * Deterministic, local PII scrubber. Runs on every note before anything can leave the device.
  * It is intentionally conservative: false positives (over-redaction) are acceptable,
  * false negatives are not. On-device AI adds a second pass for names it can recognise.
+ *
+ * Three passes: pattern rules (phones, emails, IDs, coordinates, dates of birth, addresses),
+ * cue rules (titles and relationship words before a name), then a capitalisation pass that removes
+ * proper nouns the cues missed. The evaluation set in src/lib/eval measures what each pass catches.
  */
+import { DANGER_SIGNS, SUB_COUNTIES, SYMPTOMS } from "./vocabulary";
 
 export type PiiKind = "PHONE" | "EMAIL" | "ID" | "LOCATION" | "DOB" | "NAME" | "ADDRESS";
 
@@ -43,8 +48,10 @@ const RULES: Rule[] = [
     pattern: /\b(?:id|national id|passport|nin|card)\s*(?:no\.?|number|#)?[:\s]+([A-Z0-9-]{5,})/gi,
     group: 1,
   },
+  // Document numbers that mix a letter prefix and 5+ digits, e.g. KX-4471902 or A1234567
+  { kind: "ID", pattern: /\b[A-Z]{1,3}-?\d{5,}[A-Z]?\b/g },
   // Phone numbers: 7+ digits with optional +, spaces, dots or dashes
-  { kind: "PHONE", pattern: /(?:[+(]{1,2})?\d[\d\s().-]{6,}\d/g },
+  { kind: "PHONE", pattern: /(?:[+(]{1,2})?\d[\d\s().-]{5,}\d/g },
   // Street style addresses and plot numbers
   {
     kind: "ADDRESS",
@@ -63,22 +70,100 @@ const RULES: Rule[] = [
   {
     kind: "NAME",
     pattern: new RegExp(
-      `\\b(?:[Nn]amed|[Nn]ame is|[Cc]alled|[Pp]atient|[Vv]isited|[Ss]een|[Mm]other|[Ff]ather|[Ss]on|[Dd]aughter|[Bb]rother|[Ss]ister|[Ww]ife|[Hh]usband|[Cc]hild|[Cc]aregiver|[Nn]eighbou?r)\\s+(?:of\\s+)?(${FULL_NAME})`,
+      `\\b(?:[Nn]amed|[Nn]ame is|[Cc]alled|[Pp]atient|[Vv]isited|[Ss]een|[Mm]other|[Ff]ather|[Ss]on|[Dd]aughter|[Bb]rother|[Ss]ister|[Ww]ife|[Hh]usband|[Cc]hild|[Cc]aregiver|[Nn]eighbou?r|[Gg]randmother|[Gg]randfather|[Gg]randma|[Aa]untie|[Aa]unt|[Uu]ncle|[Dd]ad|[Mm]um|[Nn]urse|[Tt]eacher)\\s+(?:of\\s+)?(${FULL_NAME})`,
       "g",
     ),
     group: 1,
   },
 ];
 
-/** Capitalised words that are clinical or geographic vocabulary, not names. */
-const NOT_NAMES = new Set([
-  "ORS", "AWD", "The", "He", "She", "They", "Has", "Had", "With", "And", "No", "Yes",
-  "Riverside", "Market", "Hill", "North", "Bay", "Kilima", "Old", "Town", "Lakeshore", "County",
-]);
+/**
+ * Capitalised words that are not names: clinical vocabulary, demo geography, calendar words and
+ * words health workers often start a sentence with. Compared in lower case.
+ */
+const NOT_NAMES = new Set(
+  [
+    "ors", "awd", "the", "he", "she", "they", "his", "her", "their", "has", "had", "with", "and", "no", "yes", "not",
+    "a", "an", "at", "in", "on", "of", "for", "from", "to", "by", "after", "before", "since", "also", "very", "now",
+    "lakeshore", "county", "sub-county", "district", "village", "school", "market", "clinic", "dispensary", "hospital",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "today", "yesterday", "tonight",
+    "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+    "patient", "pt", "case", "child", "boy", "girl", "man", "woman", "men", "women", "baby", "infant", "toddler", "adult",
+    "elderly", "old", "young", "male", "female", "mother", "father", "wife", "husband", "son", "daughter", "brother",
+    "sister", "grandmother", "grandfather", "grandma", "aunt", "auntie", "uncle", "dad", "mum", "mama", "baba", "nurse",
+    "teacher", "caregiver", "neighbour", "neighbor", "family", "household", "twins", "visited", "seen", "saw", "met",
+    "called", "referred", "contact", "phone", "tel", "mob", "home", "house", "plot", "name", "follow-up", "followup",
+    "approx", "about", "around", "mild", "moderate", "severe", "sudden", "acute", "rice", "rice-water", "watery",
+    "loose", "stool", "stools", "diarrhoea", "diarrhea", "eyes", "skin", "pinch", "pulse", "lives", "works", "found",
+    "started", "two", "three", "four", "five", "many", "several", "some", "one", "danger", "signs", "symptoms",
+    "drowsy", "lethargic", "unconscious", "weak", "thirsty", "sunken", "vomiting", "fever", "cramps", "gps", "id",
+    "cholera", "suspected", "oral", "rehydration", "solution", "risk", "high", "medium", "low", "dehydration", "signs",
+    ...SUB_COUNTIES.flatMap((s) => s.split(/\s+/)),
+    ...[...SYMPTOMS, ...DANGER_SIGNS].flatMap((v) => [...v.label.split(/\s+/), ...v.keywords.flatMap((k) => k.split(/\s+/))]),
+  ].map((w) => w.toLowerCase()),
+);
+
+function isNameWord(w: string): boolean {
+  return /^[A-Z][a-zÀ-ſ'-]+$/.test(w) && !NOT_NAMES.has(w.toLowerCase().replace(/'s$/, ""));
+}
 
 function isLikelyName(candidate: string): boolean {
   const words = candidate.split(/\s+/);
-  return words.some((w) => !NOT_NAMES.has(w));
+  return words.some((w) => !NOT_NAMES.has(w.toLowerCase()));
+}
+
+const WORD = /^[A-Za-zÀ-ſ]/;
+
+/**
+ * Removes proper nouns that the cue rules missed. Mid-sentence capitalised words, and words right
+ * after a colon as in "Name: Esther", are treated as names unless they are known vocabulary.
+ * A sentence-initial word is only treated as a name when followed by another name word,
+ * or by ", <number>" as in "Kevin, 16".
+ */
+function capitalisationPass(input: string): ScrubResult {
+  const tokens = input.match(/\[[A-Z]+\]|[A-Za-zÀ-ſ'-]+|[^A-Za-zÀ-ſ'[-]+|[[-]/g) ?? [];
+  const isName = new Array<boolean>(tokens.length).fill(false);
+
+  let sentenceStart = true;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (!WORD.test(t)) {
+      if (/[.!?\n]/.test(t)) sentenceStart = true;
+      else if (t.includes(":")) sentenceStart = false;
+      continue;
+    }
+    if (isNameWord(t)) {
+      if (!sentenceStart) {
+        isName[i] = true;
+      } else {
+        const next = tokens[i + 2];
+        const followedByName = /^\s+$/.test(tokens[i + 1] ?? "") && next !== undefined && isNameWord(next);
+        const followedByAge = /^\s*,\s*\d/.test(tokens.slice(i + 1, i + 3).join(""));
+        if (followedByName || followedByAge) isName[i] = true;
+      }
+    }
+    sentenceStart = false;
+  }
+
+  const redactions: Redaction[] = [];
+  let text = "";
+  for (let i = 0; i < tokens.length; i++) {
+    if (!isName[i]) {
+      text += tokens[i];
+      continue;
+    }
+    // Merge consecutive name words, so "Mary Chebet" becomes one placeholder.
+    let j = i;
+    let length = tokens[i].length;
+    while (j + 2 < tokens.length && /^\s+$/.test(tokens[j + 1]) && isName[j + 2]) {
+      length += tokens[j + 1].length + tokens[j + 2].length;
+      j += 2;
+    }
+    redactions.push({ kind: "NAME", length });
+    text += "[NAME]";
+    i = j;
+  }
+  return { text, redactions };
 }
 
 export function scrubDeterministic(input: string): ScrubResult {
@@ -97,7 +182,8 @@ export function scrubDeterministic(input: string): ScrubResult {
     });
   }
 
-  return { text, redactions };
+  const names = capitalisationPass(text);
+  return { text: names.text, redactions: [...redactions, ...names.redactions] };
 }
 
 /**

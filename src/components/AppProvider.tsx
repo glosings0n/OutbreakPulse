@@ -6,7 +6,7 @@ import { getDeviceAvailability, type DeviceAvailability } from "@/lib/ai/device"
 import type { CaseView } from "@/lib/cases/types";
 import { isFirebaseConfigured } from "@/lib/firebase/app";
 import { signInAsGuest, watchUser } from "@/lib/firebase/auth";
-import { watchCases } from "@/lib/firebase/firestore";
+import { saveDeclarations, watchCases, watchDeclarations } from "@/lib/firebase/firestore";
 import { REMOTE_DEFAULTS, refreshConfig, watchConfig, type AppConfig } from "@/lib/firebase/remote-config";
 import { processEnrichmentQueue } from "@/lib/offline/enrich";
 import { listJobs } from "@/lib/offline/queue";
@@ -36,6 +36,9 @@ interface AppState {
   casesError: string | null;
   pendingSync: number;
   queuedEnrichments: number;
+  /** Sub-counties with a declared outbreak (switches triage to the outbreak case definition). */
+  declaredOutbreaks: string[];
+  setOutbreakDeclared: (subCounty: string, declared: boolean) => void;
   signInGuest: () => Promise<void>;
   refreshDevice: () => Promise<void>;
   refreshQueue: () => Promise<void>;
@@ -60,6 +63,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [casesError, setCasesError] = useState<string | null>(null);
   const [pendingSync, setPendingSync] = useState(0);
   const [queuedEnrichments, setQueuedEnrichments] = useState(0);
+  const [declaredOutbreaks, setDeclaredOutbreaks] = useState<string[]>([]);
 
   const refreshDevice = useCallback(async () => {
     setDevice(await getDeviceAvailability());
@@ -126,6 +130,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [user]);
 
+  // Outbreak declarations for the workspace.
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribe = watchDeclarations(user.uid, setDeclaredOutbreaks, () => setDeclaredOutbreaks([]));
+    return () => {
+      unsubscribe();
+      setDeclaredOutbreaks([]);
+    };
+  }, [user]);
+
+  const setOutbreakDeclared = useCallback(
+    (subCounty: string, declared: boolean) => {
+      if (!user) return;
+      const next = declared ? [...declaredOutbreaks, subCounty] : declaredOutbreaks.filter((s) => s !== subCounty);
+      const { serverAck } = saveDeclarations(user.uid, user.uid, next);
+      // The listener reflects the local write at once; a rejected write is rolled back by the SDK.
+      serverAck.catch(() => undefined);
+    },
+    [user, declaredOutbreaks],
+  );
+
   // Deferred AI enrichment replays when the connection returns.
   useEffect(() => {
     if (!user || !online) return;
@@ -155,11 +180,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       casesError,
       pendingSync,
       queuedEnrichments,
+      declaredOutbreaks,
+      setOutbreakDeclared,
       signInGuest,
       refreshDevice,
       refreshQueue,
     }),
-    [configured, authReady, user, online, device, config, cases, casesError, pendingSync, queuedEnrichments, signInGuest, refreshDevice, refreshQueue],
+    [
+      configured,
+      authReady,
+      user,
+      online,
+      device,
+      config,
+      cases,
+      casesError,
+      pendingSync,
+      queuedEnrichments,
+      declaredOutbreaks,
+      setOutbreakDeclared,
+      signInGuest,
+      refreshDevice,
+      refreshQueue,
+    ],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

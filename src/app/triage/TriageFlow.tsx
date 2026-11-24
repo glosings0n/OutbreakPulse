@@ -1,17 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "@/components/AppProvider";
 import { InferenceBadge, RiskBadge, SyncBadge } from "@/components/Badges";
 import { PrivacyBoundary } from "@/components/PrivacyBoundary";
-import { DEVICE_LABELS } from "@/lib/ai/device";
+import { DEVICE_LABELS, getPhotoAvailability, type DeviceAvailability } from "@/lib/ai/device";
 import { describeAiError } from "@/lib/ai/errors";
-import { prepareDeviceModel } from "@/lib/ai/models";
-import { extractFromRawNote, extractFromScrubbedNote } from "@/lib/ai/tasks";
+import { prepareDeviceModel, preparePhotoModel } from "@/lib/ai/models";
+import { extractFromRawNote, extractFromScrubbedNote, transcribeNotePhoto } from "@/lib/ai/tasks";
 import { SAMPLE_NOTES } from "@/lib/demo/sample-notes";
+import { drawSamplePaperNote } from "@/lib/demo/sample-photo";
 import { saveCase } from "@/lib/firebase/firestore";
 import { newCaseId } from "@/lib/ids";
+import { photoToJpegBase64 } from "@/lib/photo";
 import { enqueueEnrichment } from "@/lib/offline/queue";
 import { errorMessage } from "@/lib/result";
 import type { ExtractedFields } from "@/lib/triage/extract";
@@ -27,6 +29,7 @@ import {
 import { actionsFor, evaluateRules, mergeRisk } from "@/lib/triage/rules";
 import {
   AGE_BANDS,
+  CASE_DEFINITION_LABELS,
   COUNTY,
   DANGER_SIGNS,
   SEXES,
@@ -37,6 +40,12 @@ import {
   type SymptomCode,
 } from "@/lib/triage/vocabulary";
 
+type PhotoState =
+  | { status: "idle" }
+  | { status: "reading" }
+  | { status: "done"; latencyMs: number }
+  | { status: "error"; message: string };
+
 type Step =
   | { name: "compose" }
   | { name: "analyzing"; label: string }
@@ -45,7 +54,8 @@ type Step =
   | { name: "saved"; caseId: string; riskLevel: "LOW" | "MEDIUM" | "HIGH"; queued: boolean };
 
 const AGE_LABELS: Record<(typeof AGE_BANDS)[number], string> = {
-  "0-4": "Under 5",
+  "0-1": "Under 2",
+  "2-4": "2 to 4",
   "5-14": "5 to 14",
   "15-49": "15 to 49",
   "50+": "50 and over",
@@ -59,13 +69,63 @@ function toggle<T>(list: readonly T[], item: T): T[] {
 }
 
 export function TriageFlow() {
-  const { user, online, device, config, cases, refreshQueue } = useApp();
+  const { user, online, device, config, cases, declaredOutbreaks, refreshQueue } = useApp();
   const [note, setNote] = useState("");
   const [subCounty, setSubCounty] = useState<SubCounty>("Riverside");
   const [step, setStep] = useState<Step>({ name: "compose" });
   const [fields, setFields] = useState<ExtractedFields | null>(null);
   const [queueForAi, setQueueForAi] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [photoAvailability, setPhotoAvailability] = useState<DeviceAvailability>("unsupported");
+  const [photo, setPhoto] = useState<PhotoState>({ status: "idle" });
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getPhotoAvailability().then((a) => {
+      if (!cancelled) setPhotoAvailability(a);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [device]);
+
+  function showPreview(url: string | null) {
+    setPhotoPreview((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return url;
+    });
+  }
+
+  async function onPhoto(file: Blob | undefined) {
+    if (!file) return;
+    setError(null);
+    setPhoto({ status: "reading" });
+    showPreview(URL.createObjectURL(file));
+    try {
+      try {
+        await preparePhotoModel(() => {});
+      } catch {
+        // Already prepared; the call below reports real failures.
+      }
+      const image = await photoToJpegBase64(file);
+      const res = await transcribeNotePhoto(image);
+      if (!res.ok) {
+        setPhoto({ status: "error", message: describeAiError(res.error.message) });
+      } else if (!res.value.legible || res.value.transcript.trim().length < 5) {
+        setPhoto({ status: "error", message: "No readable note was found in the photo. Type the note instead." });
+      } else {
+        setNote(res.value.transcript.slice(0, MAX_NOTE_LENGTH));
+        setPhoto({ status: "done", latencyMs: res.value.latencyMs });
+      }
+    } catch (e) {
+      setPhoto({ status: "error", message: `The photo could not be read: ${errorMessage(e)}` });
+    } finally {
+      // Drop the file reference so the photo is not kept in the page.
+      if (photoInput.current) photoInput.current.value = "";
+    }
+  }
 
   const deps = useMemo(
     () => ({
@@ -131,6 +191,7 @@ export function TriageFlow() {
         redactionCount: draft.redactionCount,
         aiRisk: draft.aiRisk,
         now: Date.now(),
+        outbreakDeclared: declaredOutbreaks.includes(subCounty),
       });
       // Not awaited: Firestore queues the write locally and syncs when online.
       const { serverAck } = saveCase(record);
@@ -147,6 +208,7 @@ export function TriageFlow() {
       }
 
       setNote("");
+      showPreview(null);
       setStep({ name: "saved", caseId: record.caseId, riskLevel: record.riskLevel, queued });
     } catch (e) {
       setError(`Could not save the case: ${errorMessage(e)}`);
@@ -155,6 +217,8 @@ export function TriageFlow() {
 
   function reset() {
     setNote("");
+    setPhoto({ status: "idle" });
+    showPreview(null);
     setFields(null);
     setError(null);
     setStep({ name: "compose" });
@@ -188,6 +252,9 @@ export function TriageFlow() {
           </button>
           <Link href="/cases/" className="btn-secondary">
             View cases
+          </Link>
+          <Link href="/system/#egress-title" className="btn-secondary">
+            See what left this device
           </Link>
         </div>
       </div>
@@ -223,7 +290,8 @@ export function TriageFlow() {
   // ---------- Review ----------
   if (step.name === "review" && fields) {
     const { draft } = step;
-    const rules = evaluateRules(fields);
+    const outbreakDeclared = declaredOutbreaks.includes(subCounty);
+    const rules = evaluateRules(fields, { outbreakDeclared });
     const merged = mergeRisk(rules, draft.aiRisk);
     return (
       <div className="grid gap-4">
@@ -303,6 +371,7 @@ export function TriageFlow() {
 
             <fieldset className="mt-5">
               <legend className="label">Symptoms</legend>
+              <p className="hint mb-2">Acute watery diarrhoea means 3 or more loose or watery stools in 24 hours.</p>
               <div className="flex flex-wrap gap-2">
                 {SYMPTOMS.map((s) => (
                   <Chip
@@ -347,7 +416,7 @@ export function TriageFlow() {
                   checked={fields.householdDeath}
                   onChange={(e) => setFields({ ...fields, householdDeath: e.target.checked })}
                 />
-                Recent death in the household
+                Death from diarrhoea in the household, including the patient
               </label>
             </div>
           </section>
@@ -364,6 +433,17 @@ export function TriageFlow() {
                 </li>
               ))}
             </ul>
+            <div
+              className={`mt-4 rounded-md border px-3 py-2 text-[15px] ${rules.meetsSuspectedCaseDefinition ? "border-high bg-high-surface" : "border-line bg-surface"}`}
+            >
+              <p className="font-medium">
+                {rules.meetsSuspectedCaseDefinition ? "Suspected cholera case" : "Not a suspected cholera case"}
+              </p>
+              <p className="mt-1 text-ink-2">{rules.caseDefinitionReason}.</p>
+              <p className="hint mt-1">
+                {CASE_DEFINITION_LABELS[rules.caseDefinition]} in {subCounty}, as set by the county team.
+              </p>
+            </div>
             <h3 className="mt-4 text-sm font-medium">Recommended actions</h3>
             <ol className="mt-2 grid list-decimal gap-1.5 pl-5 text-[15px]">
               {actionsFor(merged.riskLevel).map((a) => (
@@ -423,7 +503,57 @@ export function TriageFlow() {
           onChange={(e) => setNote(e.target.value)}
           placeholder="Example: Visited a 7 year old boy near the river market, watery diarrhoea and vomiting for 2 days, sunken eyes..."
         />
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="mt-3 rounded-md border border-line bg-surface p-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              ref={photoInput}
+              id="note-photo"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              disabled={analyzing || photo.status === "reading" || photoAvailability !== "available"}
+              onChange={(e) => void onPhoto(e.target.files?.[0])}
+            />
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={analyzing || photo.status === "reading" || photoAvailability !== "available"}
+              onClick={() => photoInput.current?.click()}
+            >
+              {photo.status === "reading" ? "Reading the photo on this device..." : "Read a paper note"}
+            </button>
+            <button
+              type="button"
+              className="text-sm text-brand underline disabled:text-ink-2 disabled:no-underline"
+              disabled={analyzing || photo.status === "reading" || photoAvailability !== "available"}
+              onClick={() => void drawSamplePaperNote().then(onPhoto, (e: unknown) => setPhoto({ status: "error", message: errorMessage(e) }))}
+            >
+              Try a sample photo
+            </button>
+            {photo.status === "done" && (
+              <span className="text-sm text-brand" role="status">
+                Read on this device in <span className="mono">{photo.latencyMs}</span> ms. Check the text before analysis.
+              </span>
+            )}
+            {photo.status === "error" && (
+              <span className="text-sm text-high" role="alert">
+                {photo.message}
+              </span>
+            )}
+          </div>
+          {photoPreview && (
+            // A local object URL, revoked when replaced; next/image cannot optimise it in a static export.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={photoPreview} alt="Photo of the paper note being read" className="mt-3 max-h-48 rounded-md border border-line" />
+          )}
+          <p className="hint mt-2">
+            {photoAvailability === "available"
+              ? "The photo is read by Gemini Nano on this device. It is never uploaded or stored, and its location data is dropped."
+              : "Reading a photo needs Gemini Nano with image input (see System). A photo cannot be de-identified before upload, so it has no cloud fallback."}
+          </p>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="hint">Try a sample:</span>
           {SAMPLE_NOTES.map((s) => (
             <button

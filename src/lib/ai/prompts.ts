@@ -17,7 +17,7 @@ for acute watery diarrhoea and suspected cholera surveillance.
 
 Rules:
 - Only use the codes listed below. Do not invent symptoms that the note does not mention.
-- ageBand: "0-4", "5-14", "15-49", "50+" or "unknown".
+- ageBand: "0-1" (under 2 years), "2-4", "5-14", "15-49", "50+" or "unknown".
 - onsetDaysAgo: whole days since symptoms started, -1 if not stated.
 - householdContact: true if anyone else in the household or a close contact is sick with similar symptoms.
 - householdDeath: true if a death in the household or among close contacts is mentioned.
@@ -38,6 +38,10 @@ Field note:
 ${note}
 """`;
 }
+
+export const PHOTO_TRANSCRIPTION_PROMPT = `The image is a photo of a community health worker's paper note about one patient.
+Transcribe the note word for word, keeping numbers, abbreviations and line order. Do not summarise or correct it.
+If the image does not show a readable note, set legible to false and leave transcript empty.`;
 
 export function scrubbedNotePrompt(scrubbedNote: string): string {
   return `${extractionRules}
@@ -64,6 +68,10 @@ You receive ONLY aggregated, de-identified counts computed by a deterministic su
 The alert statuses are already decided; do not change them. Do not invent numbers that are not in the data.
 Do not claim confirmed transmission chains: phrase links as hypotheses that field teams should verify.
 householdDeathsRecent counts deaths reported by health workers in case households; call them household deaths.
+suspectedCholeraRecent counts cases meeting the GTFCC suspected cholera definition in force at triage time.
+choleraAlertCasesRecent counts people aged 2 or older with acute watery diarrhoea and severe dehydration or death;
+two or more in one sub-county is a GTFCC cholera alert, which calls for investigation and testing, not a confirmed outbreak.
+outbreakDeclared tells whether the county team has declared an outbreak in that sub-county.
 Write alert statuses as ordinary lowercase words ("critical", "watch", "normal"), never in capital letters.
 
 Recent window: last ${input.windowDays} days. Baseline: the ${input.baselineDays} days before that.

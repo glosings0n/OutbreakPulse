@@ -11,12 +11,14 @@ export interface SurveillanceSnapshot {
   overall: AlertStatus;
   casesAnalyzed: number;
   windowStart: number;
+  /** Sub-counties where the county team has declared an outbreak. */
+  declared: string[];
 }
 
 export function buildSnapshot(
   cases: readonly CasePoint[],
   subCounties: readonly string[],
-  opts: { now: number; windowDays: number; baselineDays: number; thresholds: Thresholds },
+  opts: { now: number; windowDays: number; baselineDays: number; thresholds: Thresholds; declared?: readonly string[] },
 ): SurveillanceSnapshot {
   const aggregates = aggregateCases(cases, subCounties, opts);
   const statuses = detectAll(aggregates, opts.thresholds);
@@ -27,6 +29,7 @@ export function buildSnapshot(
     overall: overallStatus(statuses),
     casesAnalyzed: aggregates.reduce((n, a) => n + a.recentCount + a.baselineCount, 0),
     windowStart,
+    declared: subCounties.filter((s) => opts.declared?.includes(s) ?? false),
   };
 }
 
@@ -37,6 +40,7 @@ export function snapshotToModelInput(s: SurveillanceSnapshot): string {
     return {
       subCounty: a.subCounty,
       status: st?.status ?? "NORMAL",
+      outbreakDeclared: s.declared.includes(a.subCounty),
       triggers: st?.triggers ?? [],
       recentCases: a.recentCount,
       baselineCases: a.baselineCount,
@@ -46,6 +50,8 @@ export function snapshotToModelInput(s: SurveillanceSnapshot): string {
       highRiskRecent: a.highRiskRecent,
       householdLinkedRecent: a.householdLinkedRecent,
       householdDeathsRecent: a.deathsRecent,
+      suspectedCholeraRecent: a.suspectedRecent,
+      choleraAlertCasesRecent: a.choleraAlertRecent,
       dailyCountsOldestFirst: a.daily,
     };
   });

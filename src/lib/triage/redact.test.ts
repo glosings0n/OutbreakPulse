@@ -43,6 +43,28 @@ describe("scrubDeterministic", () => {
     expect(r.text).not.toMatch(/14|22 Lake Road/);
   });
 
+  it("removes letter-prefixed document numbers and 7-digit numbers", () => {
+    const r = scrubDeterministic("Nat ID of mother: KX-4471902, other number 2771903");
+    expect(r.text).not.toMatch(/4471902|2771903/);
+  });
+
+  it("removes proper nouns without a cue word", () => {
+    for (const [note, name] of [
+      ["Grace Atieno 18 months girl, watery stool", "Atieno"],
+      ["Kevin, 16, male student", "Kevin"],
+      ["Name: Esther Nyambura", "Nyambura"],
+      ["fever only. Contact Faith on the phone", "Faith"],
+      ["father is Samuel Kiprono.", "Kiprono"],
+    ] as const) {
+      expect(scrubDeterministic(note).text, note).not.toContain(name);
+    }
+  });
+
+  it("keeps capitalised vocabulary, places and calendar words", () => {
+    const note = "Seen in Riverside on Sunday. Watery diarrhoea and Vomiting, Sunken eyes. Suspected Cholera.";
+    expect(scrubDeterministic(note).text).toBe(note);
+  });
+
   it("never keeps the removed text in the redaction log", () => {
     const r = scrubDeterministic("Call 0712 345 678");
     expect(JSON.stringify(r.redactions)).not.toContain("0712");

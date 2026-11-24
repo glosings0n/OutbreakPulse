@@ -71,7 +71,7 @@ function plan(rand: () => number): Plan[] {
   return out;
 }
 
-const AGE_BANDS: AgeBand[] = ["0-4", "5-14", "15-49", "15-49", "50+"];
+const AGE_BANDS: AgeBand[] = ["2-4", "5-14", "15-49", "15-49", "50+"];
 const ROUTES: InferenceRoute[] = ["on_device", "on_device", "cloud", "rules_only"];
 
 /**

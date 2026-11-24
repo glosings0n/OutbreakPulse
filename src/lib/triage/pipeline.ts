@@ -194,12 +194,14 @@ export interface BuildCaseInput {
   redactionCount: number;
   aiRisk: AiRiskOpinion | null;
   now: number;
+  /** Whether an outbreak is declared in the case's sub-county, which selects the GTFCC case definition. */
+  outbreakDeclared?: boolean;
   isDemo?: boolean;
 }
 
 /** Applies the rules engine (risk floor) and returns the only shape that may be persisted. */
 export function buildCaseRecord(input: BuildCaseInput): CaseRecord {
-  const rules = evaluateRules(input.fields);
+  const rules = evaluateRules(input.fields, { outbreakDeclared: input.outbreakDeclared ?? false });
   const merged = mergeRisk(rules, input.aiRisk);
   const summary = sanitizeSummary(input.summary, []).text;
   return {
@@ -217,6 +219,8 @@ export function buildCaseRecord(input: BuildCaseInput): CaseRecord {
     householdDeath: input.fields.householdDeath,
     riskLevel: merged.riskLevel,
     rulesRiskLevel: rules.riskLevel,
+    suspectedCholera: rules.meetsSuspectedCaseDefinition,
+    caseDefinition: rules.caseDefinition,
     riskReasons: merged.reasons.map((r) => r.slice(0, 200)).slice(0, 12),
     deidentifiedSummary: summary,
     recommendedActions: actionsFor(merged.riskLevel),

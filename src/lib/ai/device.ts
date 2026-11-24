@@ -8,7 +8,7 @@ export type DeviceAvailability = "available" | "downloadable" | "downloading" | 
 interface PromptApiGlobal {
   LanguageModel?: {
     availability(options?: {
-      expectedInputs?: { type: "text"; languages?: string[] }[];
+      expectedInputs?: ({ type: "text"; languages?: string[] } | { type: "image" })[];
       expectedOutputs?: { type: "text"; languages?: string[] }[];
     }): Promise<"available" | "downloadable" | "downloading" | "unavailable">;
   };
@@ -38,6 +38,21 @@ export function getDeviceDiagnostics(): DeviceDiagnostics {
     chromeVersion: match ? Number(match[1]) : null,
     promptApi: Boolean((globalThis as unknown as PromptApiGlobal).LanguageModel?.availability),
   };
+}
+
+/** Whether Gemini Nano accepts image input here (needs the multimodal input flag in Chrome). */
+export async function getPhotoAvailability(): Promise<DeviceAvailability> {
+  if (typeof window === "undefined") return "unsupported";
+  const api = (globalThis as unknown as PromptApiGlobal).LanguageModel;
+  if (!api?.availability) return "unsupported";
+  try {
+    return await api.availability({
+      expectedInputs: [{ type: "text", languages: ["en"] }, { type: "image" }],
+      expectedOutputs: [{ type: "text", languages: ["en"] }],
+    });
+  } catch {
+    return "unavailable";
+  }
 }
 
 export async function getDeviceAvailability(): Promise<DeviceAvailability> {

@@ -50,6 +50,11 @@ function CaseList() {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="mono text-[15px] font-medium">{c.caseId}</span>
                 <RiskBadge level={c.riskLevel} />
+                {c.suspectedCholera && (
+                  <span className="inline-flex items-center rounded-md border border-high px-2 py-0.5 text-sm text-high">
+                    Suspected cholera
+                  </span>
+                )}
                 <SyncBadge pending={c.pendingSync} />
                 {c.isDemo && <span className="hint">Demo</span>}
               </div>

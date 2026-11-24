@@ -21,7 +21,9 @@ import {
   writeBatch,
   type Firestore,
 } from "firebase/firestore";
+import { z } from "zod";
 import { caseRecordSchema, type CaseRecord, type CaseView } from "@/lib/cases/types";
+import { byteSize, recordEgress } from "@/lib/egress/ledger";
 import { getFirebaseApp } from "./app";
 
 let db: Firestore | null = null;
@@ -55,6 +57,15 @@ export function saveCase(record: CaseRecord): { serverAck: Promise<void> } {
   const parsed = caseRecordSchema.parse(record);
   const ref = doc(getDb(), "cases", parsed.caseId);
   const serverAck = setDoc(ref, { ...parsed, createdAt: serverTimestamp() });
+  const json = JSON.stringify(parsed);
+  recordEgress({
+    channel: "firestore",
+    destination: "Firestore: cases",
+    description: `De-identified case record ${parsed.caseId} (${Object.keys(parsed).length} allowlisted fields), synced when online`,
+    bytes: byteSize(json),
+    leftDevice: true,
+    detail: json,
+  });
   return { serverAck };
 }
 
@@ -62,6 +73,15 @@ export function updateCaseEnrichment(
   caseId: string,
   patch: Pick<CaseRecord, "riskLevel" | "riskReasons" | "deidentifiedSummary" | "recommendedActions" | "inferenceSource" | "latencyMs">,
 ): Promise<void> {
+  const json = JSON.stringify(patch);
+  recordEgress({
+    channel: "firestore",
+    destination: "Firestore: cases",
+    description: `AI review update for case ${caseId}`,
+    bytes: byteSize(json),
+    leftDevice: true,
+    detail: json,
+  });
   return updateDoc(doc(getDb(), "cases", caseId), { ...patch, aiEnrichedAt: serverTimestamp() });
 }
 
@@ -111,6 +131,13 @@ export async function writeDemoCases(records: CaseRecord[]): Promise<void> {
     }
     await batch.commit();
   }
+  recordEgress({
+    channel: "firestore",
+    destination: "Firestore: cases",
+    description: `${records.length} fictional demo case records`,
+    bytes: byteSize(JSON.stringify(records)),
+    leftDevice: true,
+  });
 }
 
 export async function deleteDemoCases(workspaceId: string): Promise<number> {
@@ -124,6 +151,47 @@ export async function deleteDemoCases(workspaceId: string): Promise<number> {
     await batch.commit();
   }
   return snap.size;
+}
+
+const declarationSchema = z.object({ subCounties: z.array(z.string().max(64)).max(32) });
+
+/**
+ * Live list of sub-counties where the county team has declared an outbreak.
+ * Field triage uses it to switch to the outbreak case definition, offline too (from the local cache).
+ */
+export function watchDeclarations(
+  workspaceId: string,
+  onData: (subCounties: string[]) => void,
+  onError: (e: Error) => void,
+): () => void {
+  return onSnapshot(
+    doc(getDb(), "declarations", workspaceId),
+    (snap) => {
+      const parsed = declarationSchema.safeParse(snap.data());
+      onData(parsed.success ? parsed.data.subCounties : []);
+    },
+    onError,
+  );
+}
+
+/** Not awaited by callers on the UI path: the local cache applies it immediately, offline included. */
+export function saveDeclarations(workspaceId: string, uid: string, subCounties: string[]): { serverAck: Promise<void> } {
+  const list = [...new Set(subCounties)].sort();
+  const serverAck = setDoc(doc(getDb(), "declarations", workspaceId), {
+    workspaceId,
+    subCounties: list,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  recordEgress({
+    channel: "firestore",
+    destination: "Firestore: declarations",
+    description: "Outbreak declarations by sub-county",
+    bytes: byteSize(JSON.stringify(list)),
+    leftDevice: true,
+    detail: JSON.stringify(list),
+  });
+  return { serverAck };
 }
 
 export interface SitrepRecord {
@@ -144,6 +212,13 @@ export interface SitrepRecord {
 
 export async function saveSitrep(report: SitrepRecord): Promise<string> {
   const ref = doc(collection(getDb(), "sitreps"));
+  recordEgress({
+    channel: "firestore",
+    destination: "Firestore: sitreps",
+    description: "Situation report with its aggregate input, for audit",
+    bytes: byteSize(JSON.stringify(report)),
+    leftDevice: true,
+  });
   await setDoc(ref, { ...report, generatedAt: serverTimestamp() });
   return ref.id;
 }

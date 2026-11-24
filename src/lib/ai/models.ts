@@ -3,6 +3,8 @@
  *
  * - rawNoteModel      ONLY_ON_DEVICE   receives raw notes that may contain PII. The SDK can never
  *                                      fall back to the cloud with this instance.
+ * - photoNoteModel    ONLY_ON_DEVICE   reads a photo of a paper note. A photo cannot be scrubbed
+ *                                      before sending, so it has no cloud path at all.
  * - scrubbedNoteModel PREFER_ON_DEVICE receives deterministically scrubbed notes. Uses Gemini Nano
  *                                      when present and falls back to the cloud otherwise.
  * - sitrepModel       ONLY_IN_CLOUD    receives aggregated counts only. Population-level reasoning.
@@ -17,7 +19,7 @@ import {
   type GenerativeModel,
 } from "firebase/ai";
 import { getFirebaseApp } from "@/lib/firebase/app";
-import { extractionSchema, sitrepSchema } from "./schemas";
+import { extractionSchema, sitrepSchema, transcriptionSchema } from "./schemas";
 
 export const CLOUD_EXTRACTION_MODEL = "gemini-3.5-flash-lite";
 
@@ -40,6 +42,7 @@ export const AI_BACKEND_LABELS: Record<AiBackendKind, string> = {
 let ai: AI | null = null;
 let rawNoteModel: GenerativeModel | null = null;
 let scrubbedNoteModel: GenerativeModel | null = null;
+let photoNoteModel: GenerativeModel | null = null;
 const sitrepModels = new Map<string, GenerativeModel>();
 
 function getAiInstance(): AI {
@@ -75,6 +78,27 @@ export function getRawNoteModel(): GenerativeModel {
     });
   }
   return rawNoteModel;
+}
+
+export function getPhotoNoteModel(): GenerativeModel {
+  if (!photoNoteModel) {
+    photoNoteModel = getGenerativeModel(getAiInstance(), {
+      mode: InferenceMode.ONLY_ON_DEVICE,
+      onDeviceParams: {
+        createOptions: {
+          expectedInputs: [{ type: "text" as const, languages: ["en"] }, { type: "image" as const }],
+          expectedOutputs: [{ type: "text" as const, languages: ["en"] }],
+        },
+        promptOptions: { responseConstraint: transcriptionSchema },
+      },
+    });
+  }
+  return photoNoteModel;
+}
+
+/** Prepares the image-capable session. Must be called from a user gesture. */
+export function preparePhotoModel(onProgress: (progress: number) => void): Promise<void> {
+  return getPhotoNoteModel().initializeDeviceModel(onProgress);
 }
 
 export function getScrubbedNoteModel(): GenerativeModel {

@@ -46,7 +46,7 @@ export function extractByKeywords(note: string): ExtractedFields {
   const years = text.match(/(\d{1,3})\s*(?:years?|yrs?|y\/o|yo)\b/);
   if (months) ageBand = ageBandFromYears(Number(months[1]) / 12);
   else if (years) ageBand = ageBandFromYears(Number(years[1]));
-  else if (/\b(infant|baby|toddler)\b/.test(text)) ageBand = "0-4";
+  else if (/\b(infant|baby|newborn)\b/.test(text)) ageBand = "0-1";
   else if (/\b(elderly|old man|old woman|grandmother|grandfather)\b/.test(text)) ageBand = "50+";
 
   let sex: Sex = "unknown";

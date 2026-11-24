@@ -2,7 +2,8 @@
  * Deterministic aggregation of de-identified cases. Pure functions, no Firebase imports.
  * The cloud model only ever sees the output of this module, never individual cases.
  */
-import type { RiskLevel } from "@/lib/triage/vocabulary";
+import { hasSevereDehydration } from "@/lib/triage/rules";
+import type { AgeBand, DangerSignCode, RiskLevel, SymptomCode } from "@/lib/triage/vocabulary";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -12,6 +13,33 @@ export interface CasePoint {
   riskLevel: RiskLevel;
   householdContact: boolean;
   householdDeath: boolean;
+  ageBand: AgeBand;
+  symptoms: readonly SymptomCode[];
+  dangerSigns: readonly DangerSignCode[];
+  /** Absent on records written before the GTFCC classification was stored. */
+  suspectedCholera?: boolean;
+}
+
+/**
+ * Counts toward the GTFCC cholera alert: a person aged 2 or older (or of unrecorded age)
+ * with acute watery diarrhoea and severe dehydration, or dying of it.
+ */
+export function isCholeraAlertCase(c: Pick<CasePoint, "ageBand" | "symptoms" | "dangerSigns" | "householdDeath">): boolean {
+  return (
+    c.ageBand !== "0-1" &&
+    c.symptoms.includes("watery_diarrhoea") &&
+    (hasSevereDehydration(c.dangerSigns) || c.householdDeath)
+  );
+}
+
+/**
+ * Suspected cholera status as stored at triage time. Records written before the status was stored
+ * are classified with the standard GTFCC definition, which is the alert-case criterion above.
+ */
+export function isSuspectedCholera(
+  c: Pick<CasePoint, "ageBand" | "symptoms" | "dangerSigns" | "householdDeath" | "suspectedCholera">,
+): boolean {
+  return c.suspectedCholera ?? isCholeraAlertCase(c);
 }
 
 export interface SubCountyAggregate {
@@ -27,6 +55,10 @@ export interface SubCountyAggregate {
   highRiskRecent: number;
   householdLinkedRecent: number;
   deathsRecent: number;
+  /** Suspected cholera cases (GTFCC definition in force at triage time) in the recent window. */
+  suspectedRecent: number;
+  /** Cases counting toward the GTFCC cholera alert in the recent window. */
+  choleraAlertRecent: number;
   /** Daily counts, oldest first, covering baseline + recent windows. */
   daily: number[];
 }
@@ -70,6 +102,8 @@ export function aggregateCases(
       highRiskRecent: 0,
       householdLinkedRecent: 0,
       deathsRecent: 0,
+      suspectedRecent: 0,
+      choleraAlertRecent: 0,
       daily: new Array<number>(totalDays).fill(0),
     });
   }
@@ -86,6 +120,8 @@ export function aggregateCases(
       if (c.riskLevel === "HIGH") agg.highRiskRecent += 1;
       if (c.householdContact) agg.householdLinkedRecent += 1;
       if (c.householdDeath) agg.deathsRecent += 1;
+      if (isSuspectedCholera(c)) agg.suspectedRecent += 1;
+      if (isCholeraAlertCase(c)) agg.choleraAlertRecent += 1;
     } else {
       agg.baselineCount += 1;
     }
