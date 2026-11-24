@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+/* Design tokens. Solid colors only: no gradients, glows or heavy shadows. */
+:root {
+  --bg: #ffffff;
+  --surface: #f8fafc;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-2: #475569;
+  --brand: #0f766e;
+  --brand-hover: #115e59;
+  --brand-surface: #f0fdfa;
+  --low: #15803d;
+  --low-surface: #f0fdf4;
+  --medium: #b45309;
+  --medium-surface: #fffbeb;
+  --high: #b91c1c;
+  --high-surface: #fef2f2;
+  --focus: #0f766e;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-surface: var(--brand-surface);
+  --color-low: var(--low);
+  --color-low-surface: var(--low-surface);
+  --color-medium: var(--medium);
+  --color-medium-surface: var(--medium-surface);
+  --color-high: var(--high);
+  --color-high-surface: var(--high-surface);
+  --font-sans: var(--font-google-sans), "Inter", system-ui, sans-serif;
+  --font-mono: var(--font-google-sans-code), ui-monospace, "SFMono-Regular", monospace;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@utility card {
+  @apply rounded-lg border border-line bg-bg p-4 sm:p-5;
+}
+@utility card-muted {
+  @apply rounded-lg border border-line bg-surface p-4 sm:p-5;
+}
+@utility btn {
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 text-[15px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-brand text-white hover:bg-brand-hover;
+}
+@utility btn-secondary {
+  @apply btn border border-line bg-bg text-ink hover:bg-surface;
+}
+@utility btn-danger {
+  @apply btn border border-high bg-bg text-high hover:bg-high-surface;
+}
+@utility label {
+  @apply mb-1.5 block text-sm font-medium text-ink;
+}
+@utility hint {
+  @apply text-sm text-ink-2;
+}
+@utility input {
+  @apply min-h-11 w-full rounded-md border border-line bg-bg px-3 py-2 text-[15px] text-ink placeholder:text-ink-2/70;
+}
+@utility mono {
+  @apply font-mono tabular-nums;
+}
+@utility section-title {
+  @apply text-lg font-semibold text-ink;
+}

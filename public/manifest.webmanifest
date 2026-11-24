@@ -1,0 +1,14 @@
+{
+  "name": "OutbreakPulse",
+  "short_name": "OutbreakPulse",
+  "description": "Offline-first outbreak reporting with on-device AI and cloud surveillance.",
+  "start_url": "/triage/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

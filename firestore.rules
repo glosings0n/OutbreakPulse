@@ -1,0 +1,103 @@
+rules_version = '2';
+
+// OutbreakPulse security rules.
+// 1. Every document belongs to a workspace. For guest sessions the workspace is the user's uid,
+//    so each judge or tester gets an isolated sandbox.
+// 2. A strict field allowlist makes it impossible to store raw notes or identifiers,
+//    even from a modified client.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsWorkspace(data) {
+      return signedIn() && data.workspaceId == request.auth.uid;
+    }
+
+    function isRisk(v) {
+      return v in ['LOW', 'MEDIUM', 'HIGH'];
+    }
+
+    function isShortString(v, max) {
+      return v is string && v.size() <= max;
+    }
+
+    function isStringList(v, maxItems) {
+      return v is list && v.size() <= maxItems;
+    }
+
+    function validCase(d) {
+      return d.keys().hasOnly([
+          'caseId', 'workspaceId', 'agentUid', 'county', 'subCounty', 'ageBand', 'sex',
+          'onsetDaysAgo', 'symptoms', 'dangerSigns', 'householdContact', 'householdDeath',
+          'riskLevel', 'rulesRiskLevel', 'riskReasons', 'deidentifiedSummary',
+          'recommendedActions', 'inferenceSource', 'latencyMs', 'redactionCount',
+          'createdAt', 'clientCreatedAt', 'isDemo', 'aiEnrichedAt'
+        ])
+        && d.keys().hasAll([
+          'caseId', 'workspaceId', 'agentUid', 'county', 'subCounty', 'ageBand', 'sex',
+          'symptoms', 'dangerSigns', 'householdContact', 'householdDeath', 'riskLevel',
+          'rulesRiskLevel', 'riskReasons', 'deidentifiedSummary', 'recommendedActions',
+          'inferenceSource', 'redactionCount', 'clientCreatedAt', 'isDemo'
+        ])
+        && d.agentUid == request.auth.uid
+        && isShortString(d.caseId, 16)
+        && isShortString(d.county, 64)
+        && isShortString(d.subCounty, 64)
+        && d.ageBand in ['0-4', '5-14', '15-49', '50+', 'unknown']
+        && d.sex in ['female', 'male', 'unknown']
+        && isStringList(d.symptoms, 16)
+        && isStringList(d.dangerSigns, 16)
+        && d.householdContact is bool
+        && d.householdDeath is bool
+        && isRisk(d.riskLevel)
+        && isRisk(d.rulesRiskLevel)
+        && isStringList(d.riskReasons, 12)
+        && isShortString(d.deidentifiedSummary, 400)
+        && isStringList(d.recommendedActions, 8)
+        && d.inferenceSource in ['on_device', 'cloud', 'rules_only']
+        && d.redactionCount is int
+        && d.clientCreatedAt is int
+        && d.isDemo is bool;
+    }
+
+    match /cases/{caseId} {
+      allow read: if signedIn() && resource.data.workspaceId == request.auth.uid;
+
+      allow create: if ownsWorkspace(request.resource.data)
+        && request.resource.data.caseId == caseId
+        && validCase(request.resource.data);
+
+      // Deferred AI enrichment may only touch AI-derived fields.
+      allow update: if signedIn()
+        && resource.data.workspaceId == request.auth.uid
+        && validCase(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'riskLevel', 'riskReasons', 'deidentifiedSummary', 'recommendedActions',
+          'inferenceSource', 'latencyMs', 'aiEnrichedAt'
+        ]);
+
+      allow delete: if signedIn()
+        && resource.data.workspaceId == request.auth.uid
+        && resource.data.isDemo == true;
+    }
+
+    match /sitreps/{reportId} {
+      allow read: if signedIn() && resource.data.workspaceId == request.auth.uid;
+
+      allow create: if ownsWorkspace(request.resource.data)
+        && request.resource.data.generatedBy == request.auth.uid
+        && request.resource.data.alertStatus in ['NORMAL', 'WATCH', 'CRITICAL']
+        && request.resource.data.inferenceSource == 'cloud'
+        && isShortString(request.resource.data.executiveSummary, 4000)
+        && isStringList(request.resource.data.hypotheses, 10)
+        && isStringList(request.resource.data.recommendations, 10);
+
+      allow update: if false;
+
+      allow delete: if signedIn() && resource.data.workspaceId == request.auth.uid;
+    }
+  }
+}

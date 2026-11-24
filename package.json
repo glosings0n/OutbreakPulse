@@ -1,0 +1,41 @@
+{
+  "name": "outbreakpulse",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && node scripts/generate-sw.mjs",
+    "start": "npx serve out",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "deploy": "npm run build && firebase deploy --only hosting,firestore"
+  },
+  "dependencies": {
+    "firebase": "^13.4.0",
+    "idb-keyval": "^6.3.0",
+    "next": "16.4.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "4.3.3",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^5.1.1",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5",
+    "vitest": "^5.1.1"
+  },
+  "description": "Offline-first epidemic field reporting with on-device AI and cloud surveillance, built on Firebase AI Logic hybrid inference.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.12.0"
+  }
+}
