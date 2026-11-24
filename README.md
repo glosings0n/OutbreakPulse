@@ -4,6 +4,8 @@
 
 OutbreakPulse is an offline-first web app for outbreak reporting, built for the #BuildHybridAI 2026 hackathon with the Firebase AI Logic hybrid inference SDK.
 
+**Live app: https://outbreakpulse.web.app** (free, one-click guest sign-in)
+
 Community health workers write messy field notes full of names, phone numbers and locations. Those notes are re-typed into forms days later, and they cannot be uploaded as-is without exposing patients. OutbreakPulse turns a raw note into a structured, de-identified case record **on the device**, with Gemini Nano, even with no connection. The county surveillance team then gets deterministic cluster signals and a cloud-drafted situation report built from aggregate counts only.
 
 > Decision support for trained health workers, not a diagnosis. All data in this repository and in the demo is fictional.
@@ -75,7 +77,7 @@ flowchart LR
 
 ## Testing guide for judges
 
-1. Open the hosted app and click **Continue as guest**. Each guest session is an isolated workspace.
+1. Open https://outbreakpulse.web.app and click **Continue as guest**. Each guest session is an isolated workspace.
 2. On **Overview**, click **Load demo cases**, then open **Surveillance**: Riverside is critical and Market Hill is on watch. Click **Generate SitRep** and expand "Show exactly what was sent to the cloud".
 3. Open **Field report**, click a sample note, then **Analyze note**:
    - With Gemini Nano: the badge shows **On-device** with latency, and the privacy panel shows that nothing was sent to the cloud.

@@ -36,7 +36,7 @@ Stage Two scores four equally weighted criteria from 1 to 5. Ties break on Techn
 ## 3. Hard requirements (Stage One pass/fail)
 
 1. `firebase/ai` is imported **and called at runtime** in `src/lib/ai/`. Never mocked in production code paths.
-2. App Check is initialized before any AI call (`src/lib/firebase/app.ts`). reCAPTCHA v3 in production, debug token locally via env.
+2. App Check is initialized before any AI call (`src/lib/firebase/app.ts`). reCAPTCHA Enterprise in production (classic v3 supported as a fallback), debug token locally via env. App Check is enforced for AI Logic.
 3. Public GitHub repository with a root `LICENSE` file (Apache-2.0) detected by GitHub.
 4. `README.md` in English: value proposition, architecture diagram, setup, how to enable Gemini Nano in Chrome, how Firebase AI Logic is used, testing instructions for judges.
 5. Demo video under 3 minutes, English, public on YouTube.
@@ -71,6 +71,10 @@ Stage Two scores four equally weighted criteria from 1 to 5. Ties break on Techn
 | `sitrepModel` | `ONLY_IN_CLOUD` | Population-level reasoning over aggregates. Larger cloud model, name from Remote Config. |
 
 All three use structured output: `onDeviceParams.promptOptions.responseConstraint` and `inCloudParams.generationConfig.responseSchema` with `responseMimeType: "application/json"`, sharing one schema from `src/lib/ai/schemas.ts`. Every response is parsed and validated (`zod`); invalid output is a handled error, never a crash.
+
+The cloud backend is chosen by `NEXT_PUBLIC_AI_BACKEND`: `agent-platform` (Agent Platform Gemini API, formerly Vertex AI, billed to Blaze, used by the hosted demo) or `gemini-developer` (Gemini Developer API, works on Spark). On-device behavior is identical with both.
+
+Production hosting: Firebase Hosting site `outbreakpulse` (https://outbreakpulse.web.app), hosting target `app`. Production env overrides live in `.env.production.local` (gitignored). Deploy with `npm run deploy`.
 
 Every AI call records `response.inferenceSource` (`ON_DEVICE` or `IN_CLOUD`) and wall-clock latency, and the UI shows both.
 
