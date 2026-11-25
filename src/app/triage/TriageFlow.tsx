@@ -26,6 +26,7 @@ import {
   type Draft,
   type PreparedNote,
 } from "@/lib/triage/pipeline";
+import { formatMs } from "@/lib/format";
 import { actionsFor, evaluateRules, mergeRisk } from "@/lib/triage/rules";
 import {
   AGE_BANDS,
@@ -533,7 +534,7 @@ export function TriageFlow() {
             </button>
             {photo.status === "done" && (
               <span className="text-sm text-brand" role="status">
-                Read on this device in <span className="mono">{photo.latencyMs}</span> ms. Check the text before analysis.
+                Read on this device in <span className="mono">{formatMs(photo.latencyMs)}</span>. Check the text before analysis.
               </span>
             )}
             {photo.status === "error" && (

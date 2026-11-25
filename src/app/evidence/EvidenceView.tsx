@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useApp } from "@/components/AppProvider";
+import { formatMs } from "@/lib/format";
 import { DEVICE_LABELS } from "@/lib/ai/device";
 import { describeAiError } from "@/lib/ai/errors";
 import { prepareDeviceModel } from "@/lib/ai/models";
@@ -29,7 +30,7 @@ type SetKey = keyof typeof SETS;
 type Runs = Partial<Record<`${SetKey}:${Tier}`, NoteOutcome[]>>;
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
-const ms = (x: number | null) => (x === null ? "n/a" : `${x.toLocaleString("en-US")} ms`);
+const ms = (x: number | null) => (x === null ? "n/a" : formatMs(x));
 
 interface MetricRow {
   label: string;

@@ -1,3 +1,4 @@
+import { formatMs } from "@/lib/format";
 import type { InferenceRoute } from "@/lib/cases/types";
 import { INFERENCE_ROUTE_LABELS } from "@/lib/cases/types";
 import { ALERT_LABELS, type AlertStatus } from "@/lib/surveillance/detect";
@@ -49,7 +50,7 @@ export function InferenceBadge({ route, latencyMs }: { route: InferenceRoute; la
       title="Where inference ran for this case"
     >
       <span className="font-medium">{INFERENCE_ROUTE_LABELS[route]}</span>
-      {latencyMs !== null && <span className="mono text-xs">{latencyMs} ms</span>}
+      {latencyMs !== null && <span className="mono text-xs">{formatMs(latencyMs)}</span>}
     </span>
   );
 }

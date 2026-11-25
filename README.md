@@ -86,15 +86,24 @@ flowchart LR
 
 The **Evidence** page runs a labelled set of fictional field notes through each tier and scores it in the browser. There are two sets: a development set of 24 notes used while building the scrubber and extractor, and a held-out set of 12 notes written separately and never used for tuning. The held-out set is the default.
 
-| Held-out set (12 notes, 26 identifiers) | Deterministic tier (offline) | Hybrid, cloud path (no Nano) |
-|---|---|---|
-| Identifiers removed before any AI call | 25 of 26 | 25 of 26 (same scrubber) |
-| Danger-sign F1 | 0.63 | 0.95 |
-| Field accuracy | 75% | 94% |
-| Under-triaged cases | 2 | 0 |
-| Latency, median and p95 | instant | 1 726 ms, 3 141 ms |
+| Held-out set (12 notes, 26 identifiers) | Scrubber and keywords (offline) | Gemini Nano, raw note (on device) | Hybrid, scrubbed note (cloud path) |
+|---|---|---|---|
+| Identifiers removed | 25 of 26 | **26 of 26** | 25 of 26 |
+| Identifiers sent to the cloud | none, nothing is sent | **0** | 1 |
+| Identifiers in stored summaries | 0 | 0 | not recorded |
+| Danger-sign F1 | 0.63 | 0.95 | 0.95 |
+| Age, sex and household fields | 75% | 90% | 94% |
+| Under-triaged cases (the unsafe error) | 2 | 0 | 0 |
+| Where inference ran (Firebase AI Logic) | 12 rules | 12 on device | 12 in the cloud |
+| Latency, median and p95 | instant | 24 040 ms, 36 520 ms | 1 726 ms, 3 141 ms |
 
-On the development set the deterministic tier removes 40 of 40 identifiers. The one held-out identifier the scrubber missed is left in on purpose: it is why the cloud path shows the health worker the exact de-identified text before sending, and why the raw note itself only ever goes to an `ONLY_ON_DEVICE` model. The deterministic numbers are pinned in [`evaluate.test.ts`](src/lib/eval/evaluate.test.ts). The on-device (Gemini Nano) column can be measured on the Evidence page in Chrome with Nano enabled.
+What the numbers show:
+
+- **Routing by sensitivity works.** Gemini Nano sees the raw note, so it finds the identifier the deterministic scrubber missed and nothing identifiable leaves the device. The cloud path only ever sees scrubbed text, so its privacy is bounded by the scrubber: 1 of 26 held-out identifiers got through. That is why the cloud path shows the health worker the exact text before sending, and why raw notes only ever go to an `ONLY_ON_DEVICE` model.
+- **AI removes the unsafe error.** The rules engine on keyword extraction under-triages 2 of 12 cases. With either AI tier, the same rules engine on the extracted fields under-triages none.
+- **On-device is slower, and that is the trade.** Nano took about 24 seconds per note on the PC we measured, in Chrome on Windows, against under 2 seconds in the cloud. On-device latency depends on the hardware. When speed matters more, the offline rules path is instant, and the health worker reviews every field before saving either way.
+
+On the development set the deterministic tier removes 40 of 40 identifiers. The held-out scrubber miss is left in on purpose rather than patched after the fact. The deterministic numbers are pinned in [`evaluate.test.ts`](src/lib/eval/evaluate.test.ts). The AI columns can be reproduced on the Evidence page.
 
 ## Where Firebase is used
 
